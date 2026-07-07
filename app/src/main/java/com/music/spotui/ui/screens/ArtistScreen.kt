@@ -57,10 +57,12 @@ import com.music.spotui.data.entity.AlbumsModel
 import com.music.spotui.data.entity.ArtistOverviewModel
 import com.music.spotui.data.entity.ArtistTrackUi
 import com.music.spotui.data.entity.ArtistsModel
+import com.music.spotui.data.entity.SongsModel
 import com.music.spotui.data.preferences.addLikedSongId
 import com.music.spotui.data.preferences.isSongLiked
 import com.music.spotui.data.preferences.removeLikedSongId
 import com.music.spotui.di.SongPlayer
+import com.music.spotui.ui.components.BiographyText
 import com.music.spotui.ui.components.Loader
 import com.music.spotui.ui.navigation.Routes
 import com.music.spotui.ui.navigation.albumRoute
@@ -200,14 +202,12 @@ private fun ArtistOverviewContent(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(16.dp, 0.dp, 16.dp, 4.dp),
                 ) {
-                    Box(modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF4A90E2)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("✓", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_verified),
+                        contentDescription = "Verified Artist",
+                        tint = Color.Unspecified,
+                        modifier = Modifier.size(18.dp),
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("Verified Artist", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
@@ -353,6 +353,26 @@ private fun ArtistOverviewContent(
                                 contentDescription = "",
                             )
                         }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(14.dp, 12.dp, 14.dp, 4.dp),
+                        ) {
+                            Text(
+                                text = displayName,
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            if (overview.verified) {
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_verified),
+                                    contentDescription = "Verified Artist",
+                                    tint = Color.Unspecified,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
                         overview.monthlyListeners?.let {
                             Text(
                                 text = "${grouped(it)} monthly listeners",
@@ -362,10 +382,18 @@ private fun ArtistOverviewContent(
                                 modifier = Modifier.padding(14.dp, 12.dp, 14.dp, 4.dp),
                             )
                         }
-                        Text(
-                            text = overview.biography.orEmpty(),
-                            color = Color.Gray,
-                            fontSize = 13.sp,
+                        BiographyText(
+                            html = overview.biography,
+                            onLinkClick = { uri, displayText ->
+                                handleBiographyLink(
+                                    uri = uri,
+                                    displayText = displayText,
+                                    artistName = displayName,
+                                    navController = navController,
+                                    context = context,
+                                    artistViewModel = artistViewModel,
+                                )
+                            },
                             modifier = Modifier.padding(14.dp, 4.dp, 14.dp, 16.dp),
                         )
                     }
@@ -747,5 +775,50 @@ private fun RelatedArtistCard(artist: ArtistsModel, onClick: () -> Unit) {
         Spacer(Modifier.height(6.dp))
         Text(text = artist.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         Text(text = "Artist", color = Color.Gray, fontSize = 11.sp)
+    }
+}
+
+private fun handleBiographyLink(
+    uri: String,
+    displayText: String,
+    artistName: String,
+    navController: NavController,
+    context: android.content.Context,
+    artistViewModel: ArtistViewModel,
+) {
+    val prefix = uri.substringBeforeLast(":")
+    val entityId = uri.substringAfterLast(":")
+    if (entityId.isBlank()) return
+
+    when {
+        uri.startsWith("spotify:artist:") -> {
+            navController.navigate(artistRoute(displayText, entityId))
+        }
+        uri.startsWith("spotify:album:") -> {
+            navController.navigate(albumRoute(displayText, artistName))
+        }
+        uri.startsWith("spotify:track:") -> {
+            val url = "spotify:track:$entityId|$displayText $artistName"
+            val song = SongsModel(
+                id = entityId.hashCode().let { if (it < 0) -it else it },
+                title = displayText,
+                album = artistName,
+                singer = artistName,
+                coverUri = "",
+                url = url,
+                spotifyTrackId = entityId,
+            )
+            artistViewModel.updateQueue(listOf(song))
+            artistViewModel.updateSongState(
+                coverUri = song.coverUri,
+                title = song.title,
+                singer = song.singer,
+                playingState = true,
+                songId = song.id,
+                songIndex = 0,
+                album = song.album,
+            )
+            SongPlayer.playSong(song.url, context)
+        }
     }
 }

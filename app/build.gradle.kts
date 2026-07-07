@@ -115,6 +115,9 @@ dependencies {
     implementation("com.jakewharton.timber:timber:5.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
+    //jsoup — HTML parsing for artist biography
+    implementation(libs.jsoup)
+
     //core library desugaring (required by :innertube)
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
 }
