@@ -177,6 +177,33 @@ fun DownloadsScreen(navController: NavController) {
                     )
                 }
 
+                // ── Clear all action (per-song Export lives in the ⋯ menu) ──
+                if (songs.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(20.dp, 0.dp, 20.dp, 8.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Text(
+                            text = "Clear all",
+                            color = Color(0xFFE57373),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFF1A1A20))
+                                .clickable {
+                                    val n = com.music.spotui.data.preferences.clearAllDownloads(context)
+                                    songs = getDownloadedSongs(context)
+                                    android.widget.Toast.makeText(
+                                        context, "Removed $n download${if (n == 1) "" else "s"}",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                .padding(horizontal = 18.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+
                 // ── In-progress downloads (with live progress bar) ──
                 inProgress.forEach { (song, pct) ->
                     Row(

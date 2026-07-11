@@ -247,7 +247,7 @@ object SongPlayer {
                 withContext(Dispatchers.Main) {
                     if (currentRequest != song) return@withContext
                     ensurePlayer(appContext)
-                    player!!.setMediaItem(buildMediaItem(streamUrl))
+                    player!!.setMediaItem(buildMediaItem(streamUrl, streamMimeType(streamUrl)))
                     player!!.prepare()
                     // Restored session: continue from where the last run stopped.
                     if (song == restoreQuery && restorePositionMs > 0) {
@@ -265,7 +265,7 @@ object SongPlayer {
 
     // Build a MediaItem carrying the current track's metadata so the system media
     // notification (MediaSession) shows the right title / artist / artwork.
-    private fun buildMediaItem(streamUrl: String): MediaItem {
+    private fun buildMediaItem(streamUrl: String, mimeType: String? = null): MediaItem {
         val metadata = androidx.media3.common.MediaMetadata.Builder()
             .setTitle(metaTitle)
             .setArtist(metaArtist)
@@ -273,8 +273,25 @@ object SongPlayer {
             .build()
         return MediaItem.Builder()
             .setUri(streamUrl)
+            // Hint the container so ExoPlayer picks the right source/extractor even
+            // when the URL has no extension: TIDAL lossless is a DASH .mpd manifest,
+            // and single-file lossless is FLAC.
+            .apply { if (mimeType != null) setMimeType(mimeType) }
             .setMediaMetadata(metadata)
             .build()
+    }
+
+    /** MIME hint for a resolved stream: DASH manifest, single-file FLAC, or none. */
+    private fun streamMimeType(streamUrl: String): String? {
+        val bare = streamUrl.substringBefore('?').lowercase()
+        return when {
+            streamUrl.startsWith("data:application/dash+xml") ||
+                bare.endsWith(".mpd") || streamUrl.contains("manifest.tidal.com") || streamUrl.contains("/manifests/") ->
+                androidx.media3.common.MimeTypes.APPLICATION_MPD
+            bare.endsWith(".flac") || currentSource.startsWith("Lossless") ->
+                androidx.media3.common.MimeTypes.AUDIO_FLAC
+            else -> null
+        }
     }
 
     /** Warm the cache for an upcoming track (e.g. the next/previous queue item). */
@@ -284,6 +301,10 @@ object SongPlayer {
         // No point resolving YouTube streams while Spotify web is the engine — it's
         // wasted network/CPU that competes with the streaming audio (caused stutter).
         if (webPlaybackActive()) return
+        // Lossless FLAC URLs from the backends are short-lived / single-use. Caching
+        // one now + preloading a partial intro makes playback stop after ~30s when the
+        // continuation hits a stale URL, so resolve those fresh at play time instead.
+        if (losslessStreaming && com.music.spotui.data.preferences.currentStreamingQuality(appContext).lossless) return
         scope.launch {
             val url = runCatching { resolveStreamUrl(song, appContext) }.getOrNull()
             if (url != null) cacheIntro(url, appContext)
@@ -705,7 +726,9 @@ object SongPlayer {
             com.metrolist.spotify.Spotify.track(song.spotifyTrackId).getOrNull()?.isrc
         }.getOrNull()
         val flac = when (
-            val r = com.metrolist.spotify.SpotiFlac.resolve(song.spotifyTrackId, isrc, preferHiRes = losslessHiRes)
+            val r = com.metrolist.spotify.SpotiFlac.resolve(
+                song.spotifyTrackId, isrc, preferHiRes = losslessHiRes,
+            )
         ) {
             is com.metrolist.spotify.SpotiFlac.Result.Success -> r.track
             is com.metrolist.spotify.SpotiFlac.Result.Cooldown -> {
@@ -718,7 +741,14 @@ object SongPlayer {
         val dir = java.io.File(appContext.filesDir, "downloads").apply { mkdirs() }
         val outFile = java.io.File(dir, "${song.id}.flac")
         val tmpFile = java.io.File(dir, "${song.id}.flacpart")
-        if (!httpDownloadRanged(flac.url, tmpFile, song.url)) {
+        // TIDAL lossless is segmented DASH — remux the segments into a real .flac;
+        // single-file providers (Qobuz) download directly.
+        val ok = if (flac.container == "dash") {
+            com.metrolist.spotify.SpotiFlac.downloadDashFlacToFile(flac.url, tmpFile)
+        } else {
+            httpDownloadRanged(flac.url, tmpFile, song.url)
+        }
+        if (!ok) {
             Log.e(TAG, "FLAC download failed for ${song.title}: $lastDownloadError")
             runCatching { tmpFile.delete() }
             return false
@@ -1399,7 +1429,7 @@ object SongPlayer {
                     val (sp, sf) = createPlayerWithFilter(ctx, handleAudioFocus = false)
                     secondaryPlayer = sp
                     secondaryPlayerFilter = sf
-                    sp.setMediaItem(buildMediaItem(nextUrl))
+                    sp.setMediaItem(buildMediaItem(nextUrl, streamMimeType(nextUrl)))
                     sp.prepare()
                     sp.volume = 0f
                     sp.playWhenReady = true
