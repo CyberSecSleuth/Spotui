@@ -426,7 +426,10 @@ object SongPlayer {
         // FLAC providers are slow community proxies. Only try them when the user
         // explicitly picked Lossless; normal/high quality should stream YouTube
         // immediately.
-        if (losslessStreaming && quality.lossless) {
+        // Only attempt lossless when a SpotiFLAC server is actually up (status is
+        // cached ~60s), so playback isn't delayed probing dead servers — it goes
+        // straight to YouTube instead.
+        if (losslessStreaming && quality.lossless && com.metrolist.spotify.SpotiFlac.anyLosslessServerUp()) {
             (trackIdRegistry[song] ?: spotifyTrackIdForPlayback(song))?.let { spotifyId ->
                 val r = kotlinx.coroutines.withTimeoutOrNull(8_000) {
                     com.metrolist.spotify.SpotiFlac.resolve(
